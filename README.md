@@ -120,6 +120,29 @@ python detect_live.py 0 127.0.0.1 --config home/calib_home.json
 
 Home HSV values and relaxed thresholds do not transfer to the field.
 
+## Values to set before a real run
+
+| Where | Value | Set from |
+| --- | --- | --- |
+| `calib.json` `arena` | `size_mm`, `corners_px`, `background.png` | `calibrate_arena.py` in the arena, empty field |
+| `calib.json` | `exclude_polygons` | outline the six zones in the arena |
+| `calib.json` | `hsv` (all six classes) | `sample_hsv.py` under arena light, then the boundary check |
+| `calib.json` | `camera_properties` | lock exposure / white balance if the camera allows |
+| `calib.json` | `gem_area_mm2`, `vision.max_gem_extent_mm` | measured single stones in the arena |
+| `calib.json` `vision` | `pile_mode: true`, `sticky_frames: 5` | can be set now |
+| `calib.json` `vision` | `gripper_width_mm`, `approach_length_mm`, `own_radius_mm`, `clearance_mm` | the finished gripper |
+| `calib.json` `vision` | `min_color_fraction` (keep 0.3), `background_delta` (try 45 if shadows inflate blobs) | arena test |
+| `calib.json` `robot_tag` | `size_mm` (120, measured print), `height_mm`, `grip_offset_mm`, `footprint_mm` | final roof and arm |
+| `calib.json` `robot_tag` | `camera_height_mm`, `camera_floor_xy_mm` | measured; recheck if the camera moves |
+| `vision.py` | restore `calibrated = set(color_masks) == set(NAMES)` and the size check; remove the per-blob `print` | after all six classes are sampled |
+| `firmware/robot_ctrl/config.h` | driver type, motor pins, `L/R_INVERT`, `MAX_DUTY`, `MIN_DUTY`, `ESTOP_PIN` | actual wiring, wheels-lifted test |
+| `firmware/robot_ctrl/config.h` | servo pins, `SERVO_MIN/MAX/START_DEG`, `GRIP_*`, `LIFT_*` | calibrating the arm with the `servo` command |
+| `firmware/robot_ctrl/config.h` | `RUN_TIME_MS` back to 300000 if shortened for testing | before every match |
+| `firmware/esp_link/esp_link.ino` | 2100 x 1200 coordinate limits | measured field size (only if the receiver is used) |
+| both sketches | `secrets.h` Wi-Fi of the team hotspot | venue network |
+
+Values in `home/calib_home.json` are for home tests only; do not copy them.
+
 ## Implemented changes
 
 - Foreground segmentation against the empty field groups white highlights and

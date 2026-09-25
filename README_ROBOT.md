@@ -165,3 +165,26 @@ python teleop.py <ESP_IP> --camera 1
 - planner/autonomy loop ต้องรอแขนและ AprilTag บนหลังคาจริง
 - firmware ยังไม่ได้ compile, pin และองศา servo เป็นค่าสมมติ
 - ค่าเกี่ยวกับแขนใน `vision` (`gripper_width_mm`, `approach_length_mm`, `own_radius_mm`) เป็นค่าเดา
+
+## 8. ค่าที่ต้องตั้งก่อนใช้จริง (เช็กลิสต์)
+
+| ที่ไหน | ค่า | ได้มาจาก |
+| --- | --- | --- |
+| `calib.json` `arena` | `size_mm`, `corners_px`, `background.png` | `calibrate_arena.py` ที่สนาม ตอนสนามว่าง |
+| `calib.json` | `exclude_polygons` | วาดโซนสีทั้ง 6 ที่สนาม |
+| `calib.json` | `hsv` ครบ 6 สี | `sample_hsv.py` ใต้ไฟสนาม แล้วเช็กขอบสีทีละก้อน |
+| `calib.json` | `camera_properties` | ล็อก exposure / white balance ถ้ากล้องรองรับ |
+| `calib.json` | `gem_area_mm2`, `vision.max_gem_extent_mm` | วัดจากหินจริงที่สนาม |
+| `calib.json` `vision` | `pile_mode: true`, `sticky_frames: 5` | ตั้งได้เลย |
+| `calib.json` `vision` | `gripper_width_mm`, `approach_length_mm`, `own_radius_mm`, `clearance_mm` | แขนที่เสร็จแล้ว |
+| `calib.json` `vision` | `min_color_fraction` (คง 0.3), `background_delta` (ลอง 45 ถ้าเงาทำให้ blob ใหญ่) | ทดสอบที่สนาม |
+| `calib.json` `robot_tag` | `size_mm` (120 ตามที่วัดหลังพิมพ์), `height_mm`, `grip_offset_mm`, `footprint_mm` | หลังคาและแขนจริง |
+| `calib.json` `robot_tag` | `camera_height_mm`, `camera_floor_xy_mm` | วัดแล้ว วัดใหม่ถ้ากล้องขยับ |
+| `vision.py` | คืน `calibrated = set(color_masks) == set(NAMES)` และการเช็กขนาด, ลบ `print` ทุก blob | หลัง sample ครบ 6 สี |
+| `config.h` | ชนิด driver, pin มอเตอร์, `L/R_INVERT`, `MAX_DUTY`, `MIN_DUTY`, `ESTOP_PIN` | สายที่ต่อจริง + ทดสอบยกล้อลอย |
+| `config.h` | pin servo, `SERVO_MIN/MAX/START_DEG`, `GRIP_*`, `LIFT_*` | หาองศาด้วยคำสั่ง `servo` |
+| `config.h` | `RUN_TIME_MS` คืนเป็น 300000 ถ้าเคยลดไว้ทดสอบ | ก่อนแข่งทุกครั้ง |
+| `esp_link.ino` | ขอบเขตพิกัด 2100 × 1200 | ขนาดสนามจริง (เฉพาะถ้ายังใช้ตัวรับนี้) |
+| ทั้งสอง sketch | `secrets.h` Wi-Fi ของ hotspot ทีม | เครือข่ายที่สนาม |
+
+ค่าใน `home/calib_home.json` ใช้ทดสอบที่บ้านเท่านั้น ห้ามคัดลอกไปใช้ที่สนาม
