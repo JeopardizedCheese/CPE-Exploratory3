@@ -8,12 +8,12 @@ the rainbow stone, is not an additional tested color class.
 | Requirement | Consequence |
 | --- | --- |
 | Fully assembled robot no larger than A4, 210 x 297 mm | Check CAD footprint including mechanism; PDF gives no separate numerical height limit. |
-| Provided two-wheel/two-motor base and ESP32 main controller | Keep motion, timing and mechanism state on ESP32. |
-| Optional HuskyLens on request | Potential close-range verification; not required by the PDF. |
+| Provided two-wheel/two-motor base and ESP32 main controller | ESP32 owns motor/servo actuation, the run timer and safety stops; selection and planning run on the PC. |
+| Optional HuskyLens on request | Not used. Color is confirmed from the overhead camera before pickup; uncertain stones are skipped. |
 | Student-designed laser-cut acrylic and printed plastic parts; two servos provided | Design a simple intake and retention/release mechanism within the footprint. |
 | Stones: 50 x 35 x 35 mm; two shapes 37 x 25 x 25 mm | Tune gripper dimensions and vision size checks on actual orientations. |
 | Approximately 2100 x 1200 mm arena; supplied overhead USB camera | Calibrate actual floor dimensions and camera geometry. |
-| 54 stones, nine each of six colors, piled centrally | Visible detections cannot be assumed to count every stone. |
+| 54 stones, nine each of six colors, piled centrally | Visible detections cannot be assumed to count every stone. Touching stones merge; pick from the pile edge (`pile_mode`) or spread the pile away from the zones. |
 | Start anywhere in designated start zone | Select and verify robot starting pose; the photo places the zone on the right. |
 | Three attempts, five minutes each | ESP32 needs a local run timer and stop state. |
 | Round 1 custom gesture remote control; round 2 autonomous; round 3 choice | A keyboard/UDP camera demo does not fulfill manual mode. |
@@ -66,7 +66,8 @@ The robot, gripper, hands, pile and walls can hide stones. Large/mixed foregroun
 is withheld and lost detections are not reused. However, a small visible fragment
 or a same-color cluster can still resemble one stone. This pipeline has no depth
 sensor or trained instance model. The next physical step is single-stone intake
-and close-range verification, plus robot-pose-based dynamic masking. Avoid gem
+and reobservation from the overhead camera before pickup, plus robot-pose-based
+dynamic masking (`footprint_polygon_mm` in `robot_pose.py` provides the outline). Avoid gem
 colors on the robot's visible upper surfaces. A hidden obstacle or an object
 indistinguishable from the reference cannot be guaranteed detected.
 
@@ -75,8 +76,10 @@ distortion). Stone tops are 25-35 mm above the floor, so off-axis localization
 has parallax error. For a level camera at height H above the floor, radial floor
 projection error is approximately r*h/(H-h), for object height h and radial
 distance r from the optical axis. Measure error at the corners and for all stone
-heights. Add lens calibration/height compensation or rely on a final close-range
-alignment step before grabbing. The current 60 mm clearance is a tunable local
+heights. `robot_pose.py` applies this height correction to the roof AprilTag
+(`robot_tag.height_mm`, `camera_height_mm`, `camera_floor_xy_mm`); stone positions
+are not yet corrected. Add lens calibration/height compensation for stones or rely
+on a final close-range alignment step before grabbing. The current 60 mm clearance is a tunable local
 margin, not a navigation clearance for an A4-sized robot.
 
 The reference method assumes a fixed camera and mostly unchanged background.
@@ -87,17 +90,22 @@ online while stones sit still, or they may be absorbed into the background.
 
 ## Remaining robot implementation sequence
 
-1. Specify actual motor driver, ESP32 board/pins, encoders, servo geometry and
-   power supply. Draw/measure the complete 210 x 297 mm envelope.
-2. Implement local ESP32 stop, watchdog, five-minute timer and gesture/manual
-   input with a dead-man condition. Validate wheels lifted before driving.
-3. Measure robot pose (approved marker or other sensor), model its footprint,
-   and plan collision-free paths. Vision target coordinates alone are insufficient.
-4. Add select -> approach -> reobserve -> single intake -> color verification ->
-   matching zone -> release -> verify state transitions. Unknown color means
-   retry/reposition, never guess a destination. Handle jams and failed pickup.
-5. Train/validate gesture control and conduct complete timed manual/autonomous
-   runs. Choose round 3 mode from measured scoring/reliability.
+| Step | Status |
+| --- | --- |
+| 1. Specify motor driver, ESP32 pins, encoders, servo geometry and power; measure the 210 x 297 mm envelope | Open. `config.h` holds placeholders. |
+| 2. Local ESP32 stop, watchdog, five-minute timer, manual input with dead-man condition | Firmware written (`robot_ctrl`), simulated by `fake_robot.py`; not compiled or bench-tested. Keyboard teleop only; gesture input open. |
+| 3. Robot pose, footprint, collision-free approach | Pose from roof AprilTag implemented and tested synthetically; tag mounting waits for the final roof. Per-stone approach direction (`approach_deg`) implemented in `pile_mode`. Path planning open. |
+| 4. select -> approach -> reobserve -> single intake -> matching zone -> release -> verify | Selection helper (`target_lock.py`) implemented. Planner loop open; needs the arm and robot pose. |
+| 5. Gesture control; complete timed manual/autonomous runs; choose round 3 mode | Open. |
+
+Decisions taken since the first review:
+
+- Planning runs on the PC in one program (vision, pose, lock, controller) and sends
+  v3 commands at 20 Hz; the ESP32 does not receive targets in this design.
+- The robot handles one stone per trip. Prefer short robot -> stone -> zone trips
+  and skip uncertain stones rather than risk -1.
+- When no edge stone is pickable, push the pile toward the empty start-zone side,
+  never toward the colored zones.
 
 These items are a proposed next implementation plan, not completed features.
 
@@ -118,10 +126,31 @@ for this. Proposed release criteria: no unsafe pickup in the challenge set,
 error below the measured intake tolerance, and repeatable complete five-minute
 runs. Set numeric accuracy/latency criteria after measuring the actual mechanism.
 
+## Home test findings
+
+A 300 x 200 mm home setup with violet, cyan and crimson stones under dim, warm
+light confirmed the full vision -> UDP path: stable targets (position noise about
+0.1 mm), correct labels, removal while moving, exclusion zones, stop packet.
+
+- Crimson and violet sat only about 4-6 hue units apart; the sampler's +/-6 padding
+  made them overlap and crimson became unknown. Moving the boundary by hand
+  (violet `hi` 171, crimson `lo` 172) separated them. When the light dimmed further,
+  crimson lost most of its votes again. Crimson is the class most sensitive to
+  lighting; test it alone at several arena positions and again later in a session.
+- Shadow inside the blob keeps `color_fraction` low; a higher `background_delta`
+  (45) shrank blobs toward the stone size.
+- Unsampled classes are mislabeled as the nearest sampled class when detection
+  is allowed to run with incomplete calibration.
+- Home HSV values and relaxed thresholds are not field values. The absolute scale
+  was not verified with a ruler; verify it in the arena.
+
 ## Validation performed in this workspace
 
-The final synthetic suite contains 22 test cases. Python module compilation and
-CLI help are checked alongside it. The ESP32 sketch was reviewed but not compiled
-or flashed: the Arduino toolchain and physical board are not available here.
-No camera recording or live arena trial was supplied; HSV values, size limits,
-confidence thresholds and clearance require field validation.
+The synthetic suite contains 43 test cases (vision 22, pile 7, target lock and
+sticky targets 8, robot pose 6). With the local `vision.py` test-time edits, two
+vision cases fail as expected (see README). `fake_robot.py` was exercised with the
+`teleop.py` link: start, drive, 300 ms stop, time-up, reset and stop behave as the
+firmware state machine describes. Neither ESP32 sketch was compiled or flashed:
+the Arduino toolchain and physical board are not available here. HSV values,
+size limits, confidence thresholds, clearance and gripper dimensions require
+field validation.

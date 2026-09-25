@@ -6,6 +6,7 @@ import socket
 import time
 import uuid
 import cv2
+import numpy as np
 from vision import Detector, make_packet
 
 
@@ -60,6 +61,10 @@ def main():
                     color = (0, 220, 0) if eligible else (0, 180, 255)
                     point = (round(o.x), round(o.y))
                     cv2.circle(frame, point, 12, color, 2)
+                    if o.approach_deg is not None:   # pile mode: arrow = robot's driving direction
+                        a = np.radians(o.approach_deg)
+                        tail = (round(o.x - 35*np.cos(a)), round(o.y - 35*np.sin(a)))
+                        cv2.arrowedLine(frame, tail, point, color, 2, tipLength=.3)
                     cv2.putText(frame, f'{o.color or "?"} {o.confidence:.2f}', point,
                                 cv2.FONT_HERSHEY_SIMPLEX, .5, color, 1)
                 cv2.putText(frame, status, (10, 25), cv2.FONT_HERSHEY_SIMPLEX, .7, (0, 0, 255), 2)
