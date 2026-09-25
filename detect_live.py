@@ -3,11 +3,43 @@ import argparse
 import json
 from pathlib import Path
 import socket
+import threading
 import time
 import uuid
 import cv2
 import numpy as np
 from vision import Detector, make_packet
+
+
+class LatestFrame:
+    """Reads the camera in a background thread and keeps only the newest frame.
+
+    Without this, frames queue up in the driver while a slow frame is being
+    processed, and the display/targets fall further and further behind."""
+
+    def __init__(self, cap):
+        self.cap, self.frame, self.ok = cap, None, True
+        self.new = threading.Condition()
+        self.thread = threading.Thread(target=self._run, daemon=True)
+        self.thread.start()
+
+    def _run(self):
+        while self.ok:
+            ok, frame = self.cap.read()
+            with self.new:
+                self.ok, self.frame = ok, frame if ok else None
+                self.new.notify_all()
+
+    def read(self, timeout=2.0):
+        with self.new:
+            if self.frame is None and self.ok:
+                self.new.wait(timeout)
+            frame, self.frame = self.frame, None
+            return frame is not None, frame
+
+    def stop(self):
+        self.ok = False
+        self.thread.join(timeout=1.0)
 
 
 def main():
@@ -18,8 +50,11 @@ def main():
     parser.add_argument('--config', type=Path, default=Path(__file__).with_name('calib.json'))
     parser.add_argument('--video', help='Recorded video; UDP disabled for replay')
     parser.add_argument('--headless', action='store_true')
+    parser.add_argument('--debug', action='store_true', help='Print one line per blob (slow)')
     args = parser.parse_args()
     cfg = json.loads(args.config.read_text())
+    if args.debug:
+        cfg.setdefault('vision', {})['debug_blobs'] = True
     background_path = args.config.parent / cfg.get('background_path', 'background.png')
     background = cv2.imread(str(background_path)) if background_path.exists() else None
     detector = Detector(cfg, background)
@@ -44,11 +79,20 @@ def main():
             prop = getattr(cv2, 'CAP_PROP_'+name, None)
             if prop is None or not cap.set(prop, value):
                 print(f'Warning: camera did not accept {name}={value}')
+        if not args.video:
+            cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+            reader = LatestFrame(cap)
+        fps, last_frame_t = 0.0, time.monotonic()
         while True:
-            ok, raw = cap.read()
+            ok, raw = reader.read() if not args.video else cap.read()
             if not ok:
                 break
+            started = time.perf_counter()
             frame, observations, mask, status = detector.process(raw)
+            process_ms = (time.perf_counter() - started) * 1000
+            t = time.monotonic()
+            fps = .9 * fps + .1 / max(1e-3, t - last_frame_t)
+            last_frame_t = t
             now = time.monotonic()
             if now-last_send >= .1:
                 packet = send(observations, status)
@@ -68,6 +112,8 @@ def main():
                     cv2.putText(frame, f'{o.color or "?"} {o.confidence:.2f}', point,
                                 cv2.FONT_HERSHEY_SIMPLEX, .5, color, 1)
                 cv2.putText(frame, status, (10, 25), cv2.FONT_HERSHEY_SIMPLEX, .7, (0, 0, 255), 2)
+                cv2.putText(frame, f'{fps:4.1f} fps  {process_ms:4.0f} ms', (10, 50),
+                            cv2.FONT_HERSHEY_SIMPLEX, .55, (0, 0, 255), 2)
                 cv2.imshow('detect', frame)
                 if show_mask:
                     cv2.imshow('foreground', mask)
@@ -82,6 +128,8 @@ def main():
         try:
             send([], 'stopped')
         finally:
+            if not args.video and 'reader' in locals():
+                reader.stop()
             cap.release()
             sock.close()
             if not args.headless:

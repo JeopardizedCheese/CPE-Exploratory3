@@ -60,7 +60,8 @@ def main():
         background = warp(raw, cfg)
         points.clear()
         polygons = []
-        print('Outline each colored zone/fixture. ENTER adds polygon; u undo; s saves; q cancels.')
+        print('Outline each colored zone/fixture (ENTER adds polygon; u undo), '
+              'or press s right away to skip and use find_zones.py. q cancels.')
         while True:
             view = background.copy()
             for polygon in polygons:
@@ -83,8 +84,8 @@ def main():
                 if points:
                     print('Finish current polygon with ENTER or undo its points first.')
                     continue
-                if len(polygons) < 6:
-                    print('Mark all six scoring zones before saving.')
+                if 0 < len(polygons) < 6:
+                    print('Mark all six scoring zones, or none (then run find_zones.py).')
                     continue
                 cfg['exclude_polygons'] = polygons
                 cfg['camera_index'] = cam
@@ -93,6 +94,8 @@ def main():
                     raise RuntimeError('Cannot save reference')
                 args.config.write_text(json.dumps(cfg, indent=2))
                 print('Saved arena and reference. Recalibrate after any camera move.')
+                if not polygons:
+                    print('No zones drawn: run find_zones.py now to exclude them.')
                 break
     finally:
         cap.release()

@@ -96,9 +96,11 @@ class Detector:
         if self.background is not None:
             if self.background.shape != frame.shape:
                 raise ValueError('Reference dimensions changed; recalibrate arena/background')
-            delta = frame.astype(np.float32) - self.background.astype(np.float32)
-            offset = np.median(delta[valid > 0], axis=0) if np.any(valid) else np.zeros(3)
-            difference = np.max(np.abs(delta-offset), axis=2)
+            delta = cv2.subtract(frame, self.background, dtype=cv2.CV_16S)
+            # Global brightness offset: median of a 1-in-16 pixel subsample is plenty.
+            sample = delta[::4, ::4][valid[::4, ::4] > 0]
+            offset = np.median(sample, axis=0) if len(sample) else np.zeros(3)
+            difference = np.abs(delta - np.round(offset).astype(np.int16)).max(axis=2)
             foreground = np.uint8(difference > self.options.get('background_delta', 30)) * 255
             foreground &= valid
             changed = np.count_nonzero(foreground) / max(1, np.count_nonzero(valid))
@@ -112,11 +114,9 @@ class Detector:
         kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
         foreground = cv2.morphologyEx(foreground, cv2.MORPH_CLOSE, kernel)
         foreground &= valid
-        count, labels, stats, centroids = cv2.connectedComponentsWithStats(foreground)
-        for label in range(1, count):
-            component = np.uint8(labels == label)*255
-            contours, _ = cv2.findContours(component, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-            cv2.drawContours(foreground, contours, -1, 255, cv2.FILLED)
+        # Fill holes of every blob at once (was: one full-image pass per blob).
+        contours, _ = cv2.findContours(foreground, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        cv2.drawContours(foreground, contours, -1, 255, cv2.FILLED)
         foreground &= valid
         count, labels, stats, centroids = cv2.connectedComponentsWithStats(foreground)
         arena = self.cfg.get('arena', {})
@@ -130,62 +130,86 @@ class Detector:
         ownership = np.zeros((h, w), np.uint8)
         for m in color_masks.values():
             ownership += (m > 0).astype(np.uint8)
+        votable = reliable & (ownership == 1)
+        vote_masks = {cid: votable & (m > 0) for cid, m in color_masks.items()}
+        invalid = valid == 0
+        debug = self.options.get('debug_blobs', False)
+        pile = self.options.get('pile_mode', False) and metric
+        width_px = self.options.get('gripper_width_mm', 60) / scale
+        length_px = self.options.get('approach_length_mm', 80) / scale
+        start_px = self.options.get('approach_start_mm', 6) / scale
         for label in range(1, count):
             area = int(stats[label, cv2.CC_STAT_AREA])
             if area < self.options.get('min_obstacle_px', 12):
                 continue
-            component = labels == label
+            bx, by, bw, bh = (int(v) for v in stats[label, :4])
             x, y = centroids[label]
-            votes = {cid: np.count_nonzero(component & reliable & (m > 0) & (ownership == 1))
-                     for cid, m in color_masks.items()}
+            # Everything per blob runs in a window around it, not on the full image.
+            m = int(np.ceil(gap)) + 2
+            wy0, wy1 = max(0, by - m), min(h, by + bh + m)
+            wx0, wx1 = max(0, bx - m), min(w, bx + bw + m)
+            win = (slice(wy0, wy1), slice(wx0, wx1))
+            component = labels[win] == label
+            votes = {cid: np.count_nonzero(component & vm[win]) for cid, vm in vote_masks.items()}
             ranking = sorted(votes.items(), key=lambda pair: pair[1], reverse=True)
             cid, top = ranking[0] if ranking else (0, 0)
             second = ranking[1][1] if len(ranking) > 1 else 0
             evidence = top / area
             dominance = top / max(1, sum(votes.values()))
             # plausible = area_limits['min'] <= area * scale * scale <= area_limits['max']
-            # extent = max(stats[label, cv2.CC_STAT_WIDTH], stats[label, cv2.CC_STAT_HEIGHT]) * scale
+            # extent = max(bw, bh) * scale
             # if metric and extent > self.options.get('max_gem_extent_mm', 70):
             #     plausible = False
             plausible = True
 
-            print(
-                f"candidate={NAMES.get(cid, 'unknown')} "
-                f"area={area * scale * scale:.1f} "
-                f"unit={'mm2' if metric else 'px2'} "
-                f"size_ok={plausible} "
-                f"color_fraction={evidence:.2f} "
-                f"dominance={dominance:.2f} "
-                f"margin={(top-second) / max(1, top):.2f} "
-                f"votes={votes}"
-            )
+            if debug:
+                print(
+                    f"candidate={NAMES.get(cid, 'unknown')} "
+                    f"area={area * scale * scale:.1f} "
+                    f"unit={'mm2' if metric else 'px2'} "
+                    f"size_ok={plausible} "
+                    f"color_fraction={evidence:.2f} "
+                    f"dominance={dominance:.2f} "
+                    f"margin={(top-second) / max(1, top):.2f} "
+                    f"votes={votes}"
+                )
 
             if (not plausible or evidence < self.options.get('min_color_fraction', .3)
                     or dominance < .85 or (top-second) / max(1, top) < .65):
                 cid = 0
 
-            other = np.uint8((foreground > 0) & ~component)*255
-            other[valid == 0] = 255
-            other[[0, -1], :] = 255
-            other[:, [0, -1]] = 255
-            distance = cv2.distanceTransform(255-other, cv2.DIST_L2, 5)
+            other = ((foreground[win] > 0) & ~component) | invalid[win]
+            if wy0 == 0:
+                other[0, :] = True
+            if wy1 == h:
+                other[-1, :] = True
+            if wx0 == 0:
+                other[:, 0] = True
+            if wx1 == w:
+                other[:, -1] = True
+            distance = cv2.distanceTransform(np.uint8(~other) * 255, cv2.DIST_L2, 5)
             clearance = float(distance[component].min()) > gap
             observations.append(Observation(float(x), float(y), cid, round(evidence*dominance, 3),
                                             area*scale*scale, clearance and cid != 0))
-            if self.options.get('pile_mode', False) and metric and not observations[-1].isolated:
+            if pile and not observations[-1].isolated:
                 if cid != 0:
                     # one known stone with something nearby: any single free side is enough
-                    approach = _find_approach(blocked, component, x, y,
-                                              _away_from_nearest(blocked, component, x, y),
-                                              self.options.get('gripper_width_mm', 60) / scale,
-                                              self.options.get('approach_length_mm', 80) / scale, np.pi,
-                                              self.options.get('approach_start_mm', 6) / scale)
+                    pm = int(np.ceil(length_px + width_px)) + 2
+                    py0, py1 = max(0, by - pm), min(h, by + bh + pm)
+                    px0, px1 = max(0, bx - pm), min(w, bx + bw + pm)
+                    pwin = (slice(py0, py1), slice(px0, px1))
+                    own = labels[pwin] == label
+                    b = blocked[pwin]
+                    lx, ly = x - px0, y - py0
+                    approach = _find_approach(b, own, lx, ly, _away_from_nearest(b, own, lx, ly),
+                                              width_px, length_px, np.pi, start_px)
                     if approach is not None:
                         observations[-1].isolated = True
                         observations[-1].approach_deg = approach
                 else:
                     for rx, ry, rc, conf, rarea, approach in directional_candidates(
-                            component, color_masks, reliable & (ownership == 1), blocked, scale, self.options):
+                            labels, label, (bx, by, bw, bh), color_masks, votable, blocked,
+                            scale, self.options):
                         observations.append(Observation(rx, ry, rc, conf, rarea, True, False, approach))
         used = set()
         new_counts = []
@@ -251,7 +275,7 @@ def _away_from_nearest(blocked, own, cx, cy):
     return float(np.arctan2(cy - ys[i], cx - xs[i]))
 
 
-def directional_candidates(component, color_masks, votable, blocked, scale, options):
+def directional_candidates(labels, label, bbox, color_masks, votable, blocked, scale, options):
     """Pile handling: pickable single-colour stones on the edge of a merged blob.
 
     Splits the blob into single-colour regions, keeps regions that look like one stone,
@@ -268,15 +292,17 @@ def directional_candidates(component, color_masks, votable, blocked, scale, opti
     start_px = options.get('approach_start_mm', 6) / scale
     kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
     # Work in a window around the blob; the margin fits any corridor that stays in the arena.
-    ys, xs = np.nonzero(component)
+    bx0, by0, bw, bh = bbox
     margin = int(np.ceil(length_px + width_px + own_radius)) + 2
-    y0, x0 = max(0, ys.min() - margin), max(0, xs.min() - margin)
-    y1 = min(component.shape[0], ys.max() + margin + 1)
-    x1 = min(component.shape[1], xs.max() + margin + 1)
+    H, W = labels.shape
+    y0, x0 = max(0, by0 - margin), max(0, bx0 - margin)
+    y1, x1 = min(H, by0 + bh + margin), min(W, bx0 + bw + margin)
     window = (slice(y0, y1), slice(x0, x1))
-    component, votable, blocked = component[window], votable[window], blocked[window]
+    component = labels[window] == label
+    votable, blocked = votable[window], blocked[window]
     color_masks = {cid: m[window] for cid, m in color_masks.items()}
-    bx, by = xs.mean() - x0, ys.mean() - y0
+    ys, xs = np.nonzero(component)
+    bx, by = xs.mean(), ys.mean()
     colored = {cid: component & votable & (m > 0) for cid, m in color_masks.items()}
     found = []
     for cid, region_all in colored.items():
