@@ -36,8 +36,7 @@ DEFAULT_PARAMS = {
     'ramp_per_s': 3.0,
     'servo_deg_per_s': 180.0,
     'grip_servo': 0, 'grip_open': 60, 'grip_close': 120,
-    'lift_servo': 1, 'lift_up': 40, 'lift_down': 140,
-    'servo_start': [90, 90],
+    'servo_start': [90],
     'grip_reach_mm': 25.0,       # stone centre must be within this of the grip point (forward)
     'grip_side_mm': 18.0,        #   ... and this sideways
     'grip_success': 1.0,         # probability a well-placed grab holds
@@ -99,14 +98,11 @@ class SimRobot:
             self._enter('ESTOP', 'remote stop')
         elif c == 'reset' and self.state in ('DONE', 'ESTOP'):
             self._enter('IDLE', 'reset')
-        elif c in ('grip', 'lift', 'servo') and self.state in ('IDLE', 'RUNNING'):
+        elif c in ('grip', 'servo') and self.state in ('IDLE', 'RUNNING'):
             p = self.p
             if c == 'grip':
                 deg = {'open': p['grip_open'], 'close': p['grip_close']}.get(f.get('p'))
                 i = p['grip_servo']
-            elif c == 'lift':
-                deg = {'up': p['lift_up'], 'down': p['lift_down']}.get(f.get('p'))
-                i = p['lift_servo']
             else:
                 i, deg = f.get('i', -1), f.get('deg')
             if deg is not None and 0 <= i < len(self.servo):
@@ -165,9 +161,9 @@ class SimRobot:
 
     def _gripper(self):
         p = self.p
-        grip, lift = self.servo[p['grip_servo']], self.servo[p['lift_servo']]
+        grip = self.servo[p['grip_servo']]
         gx, gy = self.grip_point()
-        if self.held is None and abs(grip - p['grip_close']) < 2 and abs(lift - p['lift_down']) < 5:
+        if self.held is None and abs(grip - p['grip_close']) < 2:
             f = (math.cos(self.h), math.sin(self.h))
             best = None
             for s in self.stones:

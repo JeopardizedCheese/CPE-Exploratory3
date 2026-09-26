@@ -19,7 +19,7 @@ PC (โปรแกรม Python ตัวเดียว)
  ├─ กล้อง → robot_pose.py    → หุ่น: x, y, heading
  ├─ TargetLock               → เลือกหิน 1 ก้อนแล้วล็อกไว้
  ├─ planner (ยังไม่ได้เขียน)  → จะขับไปไหนต่อ
- └─ ส่ง UDP v3 20 ครั้ง/วินาที: drive l,r / grip / lift
+ └─ ส่ง UDP v3 20 ครั้ง/วินาที: drive l,r / grip
          ▼  Wi-Fi
 ESP32 (robot_ctrl.ino)
  └─ หมุนมอเตอร์, ขยับ servo, หยุดเองเมื่อมีปัญหา
@@ -76,7 +76,7 @@ python teleop.py <ESP_IP> --no-log
 4. กด `w` ค้าง แล้ว **ปิดโปรแกรม / ปิด Wi-Fi ของ PC** → ล้อต้องหยุดภายใน 0.3 s
 5. กดปุ่ม e-stop ตอนล้อหมุน → หยุดทันที, จอขึ้น ESTOP; กด `r` ขณะยังกดปุ่มค้าง → ต้องไม่ reset
 6. ทดสอบหมดเวลา: ตั้ง `RUN_TIME_MS` เป็น 20000 ชั่วคราว → ต้องเข้า DONE เอง (อย่าลืมคืนเป็น 300000)
-7. servo: หาองศาด้วยคำสั่งดิบ แล้วเอาไปใส่ `GRIP_*`, `LIFT_*`, `SERVO_MIN/MAX_DEG`
+7. servo: หาองศาด้วยคำสั่งดิบ แล้วเอาไปใส่ `GRIP_*`, `SERVO_MIN/MAX_DEG`
    ```python
    from teleop import Link; l = Link('<ESP_IP>', 4211); l.send('servo', i=0, deg=90)
    ```
@@ -142,7 +142,7 @@ python teleop.py <ESP_IP> --no-log
 - อยู่ในกอง → ทิศที่อยากได้คือออกจากกลางกอง; อยู่ใกล้สิ่งของ/ขอบ → ออกจากสิ่งที่ใกล้ที่สุด
 - ลอง 16 ทิศ เริ่มจากทิศที่อยากได้ (ในกองไม่เกิน ±67.5°) ทิศแรกที่แถบกว้างเท่าแขนยาว 80 mm ว่าง ชนะ
 
-**หุ่นทำอะไรต่อ** (planner ที่ยังไม่ได้เขียน): ขับไปจุดบนแถบนั้นห่างหิน ~150 mm → หมุนให้หันไปที่ `approach_deg` → ค่อย ๆ เดินเข้าจนปากแขน (`grip_x, grip_y`) ถึงหิน → `grip close` → `lift up` → ไปโซนสีที่ล็อกไว้ → `lift down` → `grip open` → ถอย → `done()`
+**หุ่นทำอะไรต่อ** (`autonomy.py`): ขับไปจุดบนแถบนั้นห่างหิน ~160 mm → หมุนให้หันไปที่ `approach_deg` → ค่อย ๆ เดินเข้าจนปากแขน (`grip_x, grip_y`) ถึงหิน → `grip close` → ลากหินไปตามพื้นถึงโซนสีที่ล็อกไว้ → `grip open` → ถอย → `done()` (ไม่มีการยกแขน)
 
 **กองหินตอนเริ่ม:** กองแน่น ๆ มีหินที่หยิบได้แค่ที่ขอบกอง ถ้าไม่เหลือก้อนที่หยิบได้ ให้ดันกองไป**ทางขวา** (ฝั่งโซนเริ่ม ไม่มีโซนสี) ห้ามดันไปทางโซนสี เพราะหินที่เข้าโซนผิดได้ −1
 
@@ -154,7 +154,7 @@ python teleop.py <ESP_IP> --camera 1
 
 ได้ `runs/<เวลา>/`:
 - `video.mp4` เฟรมกล้องดิบ → เล่นซ้ำด้วย `detect_live.py --video` หรือ `robot_pose.py --video` ได้
-- `log.jsonl` 20 แถว/วินาที: `t`, `frame`, `action {l, r}`, `events` (start/stop/grip/lift), `status` (state, servo, …), `pose`
+- `log.jsonl` 20 แถว/วินาที: `t`, `frame`, `action {l, r}`, `events` (start/stop/grip), `status` (state, servo, …), `pose`
 - `meta.json` ค่าตั้งและ calib ที่ใช้ตอนนั้น
 
 แต่ละแถวคือ (observation, action) ของ 1 timestep ตรงกับที่ LeRobotDataset ต้องการ ภายหลังเขียน converter ได้โดยไม่ต้องเก็บข้อมูลใหม่
@@ -182,7 +182,7 @@ python teleop.py <ESP_IP> --camera 1
 | `calib.json` `robot_tag` | `camera_height_mm`, `camera_floor_xy_mm` | วัดแล้ว วัดใหม่ถ้ากล้องขยับ |
 | `vision.py` | คืน `calibrated = set(color_masks) == set(NAMES)` และการเช็กขนาด, ลบ `print` ทุก blob | หลัง sample ครบ 6 สี |
 | `config.h` | ชนิด driver, pin มอเตอร์, `L/R_INVERT`, `MAX_DUTY`, `MIN_DUTY`, `ESTOP_PIN` | สายที่ต่อจริง + ทดสอบยกล้อลอย |
-| `config.h` | pin servo, `SERVO_MIN/MAX/START_DEG`, `GRIP_*`, `LIFT_*` | หาองศาด้วยคำสั่ง `servo` |
+| `config.h` | pin servo, `SERVO_MIN/MAX/START_DEG`, `GRIP_*` | หาองศาด้วยคำสั่ง `servo` |
 | `config.h` | `RUN_TIME_MS` คืนเป็น 300000 ถ้าเคยลดไว้ทดสอบ | ก่อนแข่งทุกครั้ง |
 | `esp_link.ino` | ขอบเขตพิกัด 2100 × 1200 | ขนาดสนามจริง (เฉพาะถ้ายังใช้ตัวรับนี้) |
 | ทั้งสอง sketch | `secrets.h` Wi-Fi ของ hotspot ทีม | เครือข่ายที่สนาม |

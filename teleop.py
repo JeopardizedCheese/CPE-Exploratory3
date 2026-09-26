@@ -6,7 +6,7 @@
 Keys (click the window first so it has keyboard focus):
   w/s forward/back   a/d turn in place   q/e arc left/right   SPACE stop wheels
   + / -  speed       g START run (5 min)  x E-STOP (latched)   r reset after stop/time up
-  o/c gripper open/close    u/j lift up/down    ESC quit (sends stop)
+  o/c gripper open/close    ESC quit (sends stop)
 
 Hold mode (default): wheels stop HOLD_MS after you release a key.
 --latch: a key keeps driving until SPACE (the ESP32 still stops if packets stop).
@@ -76,7 +76,6 @@ DRIVE_KEYS = {
 }
 ARM_KEYS = {
     ord('o'): ('grip', 'open'), ord('c'): ('grip', 'close'),
-    ord('u'): ('lift', 'up'), ord('j'): ('lift', 'down'),
 }
 
 
@@ -203,7 +202,7 @@ def main():
             lines = [f'{state}  ({st.get("why", "")})  left {t_left:5.1f}s  link {age*1000 if linked else 0:.0f}ms',
                      f'speed {speed:.1f}  cmd l={drive[0]:+.2f} r={drive[1]:+.2f}  out l={st.get("l", 0):+.2f} r={st.get("r", 0):+.2f}',
                      f'servo {st.get("servo")}  rssi {st.get("rssi")}  {"LATCH" if args.latch else "HOLD"}',
-                     'wasd/qe drive  SPACE stop  g start  x ESTOP  r reset  o/c grip  u/j lift  +/- speed  ESC quit']
+                     'wasd/qe drive  SPACE stop  g start  x ESTOP  r reset  o/c grip  +/- speed  ESC quit']
             red, green, white = (0, 0, 255), (0, 220, 0), (230, 230, 230)
             colors = [green if state == 'RUNNING' else red, white, white, white]
             if pose_est is not None:

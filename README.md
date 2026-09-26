@@ -151,7 +151,7 @@ Home HSV values and relaxed thresholds do not transfer to the field.
 | `calib.json` `robot_tag` | `camera_height_mm`, `camera_floor_xy_mm` | measured; recheck if the camera moves |
 | `vision.py` | restore `calibrated = set(color_masks) == set(NAMES)` and the size check; remove the per-blob `print` | after all six classes are sampled |
 | `firmware/robot_ctrl/config.h` | driver type, motor pins, `L/R_INVERT`, `MAX_DUTY`, `MIN_DUTY`, `ESTOP_PIN` | actual wiring, wheels-lifted test |
-| `firmware/robot_ctrl/config.h` | servo pins, `SERVO_MIN/MAX/START_DEG`, `GRIP_*`, `LIFT_*` | calibrating the arm with the `servo` command |
+| `firmware/robot_ctrl/config.h` | servo pin, `SERVO_MIN/MAX/START_DEG`, `GRIP_*` | calibrating the gripper with the `servo` command |
 | `firmware/robot_ctrl/config.h` | `RUN_TIME_MS` back to 300000 if shortened for testing | before every match |
 | `firmware/esp_link/esp_link.ino` | 2100 x 1200 coordinate limits | measured field size (only if the receiver is used) |
 | both sketches | `secrets.h` Wi-Fi of the team hotspot | venue network |
@@ -250,7 +250,7 @@ debugging aid.
 
 `s` is a 12-character session, `q` an increasing sequence. Commands: `drive`
 (`l`, `r` in -1..1), `start`, `stop`, `reset`, `grip` (`p`: open/close),
-`lift` (`p`: up/down), `servo` (`i`, `deg`). `firmware/robot_ctrl/` runs a local
+`servo` (`i`, `deg`). There is no lift: the gripper only opens and closes. `firmware/robot_ctrl/` runs a local
 state machine (IDLE -> RUNNING -> DONE after 5 minutes; ESTOP by button or `stop`),
 stops the wheels when no `drive` arrives for 300 ms, and returns a status packet
 every 200 ms to the sender. Pins and servo angles in `config.h` are placeholders.
@@ -304,7 +304,7 @@ python -m unittest discover -s tests              # includes simulated runs and 
 
 | File | Role |
 | --- | --- |
-| `autonomy.py` | Planner state machine (SEARCH → GOTO_STAGE → ALIGN → APPROACH → GRIP → LIFT → CARRY → LOWER → RELEASE → BACKOFF) and the sim/real runners |
+| `autonomy.py` | Planner state machine (SEARCH → GOTO_STAGE → ALIGN → APPROACH → GRIP → CARRY → RELEASE → BACKOFF) and the sim/real runners |
 | `perception.py` | Camera frame → robot pose + stones in mm; masks the robot's footprint out of detection |
 | `sim.py` | Simulated robot/field (firmware behaviour, wheels, gripper, zones, simple camera) |
 | `fake_robot.py` | Firmware stand-in on UDP 4211 for `teleop.py` tests without hardware |

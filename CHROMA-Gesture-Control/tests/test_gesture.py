@@ -90,8 +90,7 @@ class GestureTests(unittest.TestCase):
 
     def test_arm_actions_one_shot_with_neutral_between(self):
         self.hold('V', n=12)
-        for pose, expected in [('ONE', ('grip', 'open')), ('THREE', ('grip', 'close')),
-                               ('THUMB_UP', ('lift', 'up')), ('THUMB_DOWN', ('lift', 'down'))]:
+        for pose, expected in [('ONE', ('grip', 'open')), ('THREE', ('grip', 'close'))]:
             self.ready()
             self.assertEqual(self.hold(pose, n=20), [expected])
             self.assertEqual(self.hold(pose, n=10), [])

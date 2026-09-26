@@ -106,9 +106,8 @@ class GestureControl:
             v = self.speed * .6
             self.label = 'RIGHT' if dx > 0 else 'LEFT'
             return (v, -v, None) if dx > 0 else (-v, v, None)
-        events = {'ONE': ('grip', 'open'), 'THREE': ('grip', 'close'),
-                  'THUMB_UP': ('lift', 'up'), 'THUMB_DOWN': ('lift', 'down')}
-        self.label = 'ARM: 1=open 3=close thumb=lift; OPEN to rearm'
+        events = {'ONE': ('grip', 'open'), 'THREE': ('grip', 'close')}
+        self.label = 'ARM: 1=open 3=close; OPEN to rearm'
         # Arm gestures require an open palm between every command.
         if hand.pose in events and new_frame and held >= .4 and not self._fired:
             self._fired = True

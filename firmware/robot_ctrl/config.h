@@ -29,12 +29,12 @@
 #define MIN_DUTY 0.00f       // duty where wheels just start moving (measure it)
 #define RAMP_PER_SEC 3.0f    // speed-up limit (full scale per second); slow-down is instant
 
-// ---------- Servos (2 provided) ----------
-#define SERVO_COUNT 2
-#define SERVO_PINS      {18, 19}
-#define SERVO_MIN_DEG   {0, 0}       // mechanical limits: measure so the arm never hits the frame
-#define SERVO_MAX_DEG   {180, 180}
-#define SERVO_START_DEG {90, 90}     // position at boot (servos WILL jump here at power-on)
+// ---------- Servo (gripper only; no lift) ----------
+#define SERVO_COUNT 1
+#define SERVO_PINS      {18}
+#define SERVO_MIN_DEG   {0}          // mechanical limits: measure so the jaws never stall on their stops
+#define SERVO_MAX_DEG   {180}
+#define SERVO_START_DEG {90}         // position at boot (the servo WILL jump here at power-on)
 #define SERVO_US_MIN 500
 #define SERVO_US_MAX 2500
 #define SERVO_DEG_PER_SEC 180.0f     // slow moves reduce current spikes / brownout
@@ -43,9 +43,6 @@
 #define GRIP_SERVO 0
 #define GRIP_OPEN_DEG  60
 #define GRIP_CLOSE_DEG 120
-#define LIFT_SERVO 1
-#define LIFT_UP_DEG    40
-#define LIFT_DOWN_DEG  140
 
 // ---------- Safety ----------
 #define ESTOP_PIN 23             // push button to GND (INPUT_PULLUP). -1 disables: NOT recommended

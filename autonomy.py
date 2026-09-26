@@ -6,17 +6,19 @@
 
 The planner is deliberately simple:
 
-  SEARCH -> GOTO_STAGE -> ALIGN -> APPROACH -> GRIP -> LIFT -> CARRY -> LOWER -> RELEASE -> BACKOFF
-     ^                                                                                        |
-     +----------------------------------------------------------------------------------------+
+  SEARCH -> GOTO_STAGE -> ALIGN -> APPROACH -> GRIP -> CARRY -> RELEASE -> BACKOFF
+     ^                                                                    |
+     +--------------------------------------------------------------------+
 
-  SEARCH     lock the cheapest target (robot -> stone -> zone), open gripper, lower arm
+  SEARCH     lock the cheapest target (robot -> stone -> zone), open the gripper
   GOTO_STAGE drive to a point stage_mm behind the stone, on its approach line
   ALIGN      turn in place to the approach heading
   APPROACH   creep in until the grip point reaches the stone (the robot now hides it)
-  GRIP/LIFT  close, lift; each waits until the ESP32 reports the servo arrived
-  CARRY      drive the grip point to the centre of the stone's zone (colour fixed at lock)
-  LOWER/RELEASE/BACKOFF  put it down, open, reverse, repeat
+  GRIP       close; waits until the ESP32 reports the grip servo arrived
+  CARRY      slide the stone along the floor to the centre of its zone (colour fixed at lock)
+  RELEASE/BACKOFF  open, reverse, repeat
+
+The gripper has no lift: stones stay on the floor and are pushed/slid in the closed jaws.
 
 Failures never drop a stone in the wrong place: approach/align/goto time out into a
 short backoff and the stone is skipped for a while; a missed grab is noticed when the
@@ -45,8 +47,7 @@ DEFAULTS = {
     'pose_timeout_s': 0.5, 'servo_tol_deg': 3, 'servo_timeout_s': 2.0,
     'timeouts_s': {'GOTO_STAGE': 15, 'ALIGN': 6, 'APPROACH': 8, 'SEARCH_IDLE': 2.5, 'PARK': 10},
     'skip_s': 25, 'skip_mm': 40, 'pick_check_mm': 180, 'pile_avoid_mm': 170,
-    'grip_open': 60, 'grip_close': 120, 'lift_up': 40, 'lift_down': 140,
-    'grip_servo': 0, 'lift_servo': 1,
+    'grip_open': 60, 'grip_close': 120, 'grip_servo': 0,
     'park_mm': None,                 # where to wait when nothing is pickable; default right side
     'stone_height_mm': 20,
 }
@@ -225,7 +226,7 @@ class Planner:
                     self.retries = 0
                 self._last_locked = (t['x'], t['y'])
                 self.heading = self._approach_heading(t, pose)
-                ev += [('grip', {'p': 'open'}), ('lift', {'p': 'down'})]
+                ev.append(('grip', {'p': 'open'}))
                 self._go('GOTO_STAGE', now, f"colour {t['color']}")
             elif self._elapsed(now) > o['timeouts_s']['SEARCH_IDLE']:
                 self._go('PARK', now, 'nothing pickable')
@@ -266,7 +267,7 @@ class Planner:
                 self._go('SEARCH', now, f'target {self.lock.reason}')
                 return 0.0, 0.0, ev
             cmd = self._turn_to(pose, self.heading)
-            ready = self._servo_at(status, 'grip', o['grip_open']) and self._servo_at(status, 'lift', o['lift_down'])
+            ready = self._servo_at(status, 'grip', o['grip_open'])
             if cmd is None and ready:
                 self.side_avg = None
                 self._go('APPROACH', now)
@@ -318,12 +319,6 @@ class Planner:
 
         if s == 'GRIP':
             if self._servo_done(now, status, 'grip', o['grip_close']):
-                ev.append(('lift', {'p': 'up'}))
-                self._go('LIFT', now)
-            return 0.0, 0.0, ev
-
-        if s == 'LIFT':
-            if self._servo_done(now, status, 'lift', o['lift_up']):
                 self._go('CARRY', now, f'to zone {self.carrying}')
             return 0.0, 0.0, ev
 
@@ -344,9 +339,11 @@ class Planner:
                         self.discard_to = self._safe_drop(pose)
                         self._go('DISCARD', now, 'grab missed')
                         return 0.0, 0.0, ev
-            if self._arrived(pose, pose.grip_x, pose.grip_y, zx, zy, o['zone_tol_mm']):
-                ev.append(('lift', {'p': 'down'}))
-                self._go('LOWER', now)
+            zr = self.zones[self.carrying][2]
+            if self._arrived(pose, pose.grip_x, pose.grip_y, zx, zy, o['zone_tol_mm']) and \
+                    math.hypot(zx - pose.grip_x, zy - pose.grip_y) <= zr * 0.6:   # never open outside the zone
+                ev.append(('grip', {'p': 'open'}))
+                self._go('RELEASE', now)
                 return 0.0, 0.0, ev
             return (*self._drive_to(pose, pose.grip_x, pose.grip_y, zx, zy, o['cruise']), ev)
 
@@ -354,19 +351,8 @@ class Planner:
             dx, dy = self.discard_to
             if self._in_any_zone(pose.grip_x, pose.grip_y, 90) and self._elapsed(now) < 15:
                 return (*self._drive_to(pose, pose.grip_x, pose.grip_y, dx, dy, o['cruise']), ev)
-            ev += [('lift', {'p': 'down'}), ('grip', {'p': 'open'})]
+            ev.append(('grip', {'p': 'open'}))
             self._go('BACKOFF', now, 'discarded')
-            return 0.0, 0.0, ev
-
-        if s == 'LOWER':
-            if self._servo_done(now, status, 'lift', o['lift_down']):
-                zx, zy, zr = self.zones[self.carrying]
-                if math.hypot(zx - pose.grip_x, zy - pose.grip_y) > zr * 0.6:
-                    self._go('CARRY', now, 'drifted from zone')     # never open outside the zone
-                    ev.append(('lift', {'p': 'up'}))
-                    return 0.0, 0.0, ev
-                ev.append(('grip', {'p': 'open'}))
-                self._go('RELEASE', now)
             return 0.0, 0.0, ev
 
         if s == 'RELEASE':

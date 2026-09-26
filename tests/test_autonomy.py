@@ -66,12 +66,20 @@ class Safety(unittest.TestCase):
         _, _, ev = p.step(3.0, pose(1000, 600, 0, 3.0), [], still_there)   # well away from zones
         self.assertIn(('grip', {'p': 'open'}), ev)
 
-    def test_no_release_outside_zone(self):
+    def test_release_only_inside_own_zone(self):
         p = Planner(config())
-        p.state, p.since, p.carrying = 'LOWER', 0.0, 4
-        _, _, ev = p.step(5.0, pose(1000, 800, 0, 5.0), [], [], {'state': 'RUNNING', 'servo': [120, 140]})
+        p.state, p.since, p.carrying, p.pick_checked = 'CARRY', 0.0, 4, True
+        _, _, ev = p.step(5.0, pose(1000, 800, 0, 5.0), [], [], {'state': 'RUNNING', 'servo': [120]})
         self.assertNotIn(('grip', {'p': 'open'}), ev)
         self.assertEqual(p.state, 'CARRY')
+        _, _, ev = p.step(5.1, pose(1470 - 120, 1050, 0, 5.1), [], [], {'state': 'RUNNING', 'servo': [120]})
+        self.assertIn(('grip', {'p': 'open'}), ev)
+        self.assertEqual(p.state, 'RELEASE')
+
+    def test_never_sends_lift(self):
+        cfg = config()
+        r = autonomy.run_sim(cfg, autonomy.scenario(cfg, 'scattered', 0), seconds=30)
+        self.assertGreaterEqual(r['correct'], 1)
 
     def test_stands_still_without_pose(self):
         p = Planner(config())

@@ -1,4 +1,4 @@
-// Robot controller: wheels + 2 servos + all safety logic, driven by UDP protocol v3.
+// Robot controller: wheels + gripper servo + all safety logic, driven by UDP protocol v3.
 // Requires ESP32 Arduino core 3.x and ArduinoJson 7.
 //
 // States:  IDLE --start--> RUNNING --5 min--> DONE
@@ -176,10 +176,6 @@ void handlePacket(char *buf, unsigned long now) {
     const char *p = doc["p"] | "";
     if (!strcmp(p, "open")) setServo(GRIP_SERVO, GRIP_OPEN_DEG);
     if (!strcmp(p, "close")) setServo(GRIP_SERVO, GRIP_CLOSE_DEG);
-  } else if (!strcmp(c, "lift")) {
-    const char *p = doc["p"] | "";
-    if (!strcmp(p, "up")) setServo(LIFT_SERVO, LIFT_UP_DEG);
-    if (!strcmp(p, "down")) setServo(LIFT_SERVO, LIFT_DOWN_DEG);
   }
   // "ping" and unknown commands only refresh the link.
 }
