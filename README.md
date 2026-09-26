@@ -32,6 +32,15 @@ Every camera tool accepts `--config <path>`; the default is `calib.json` next to
 scripts.
 
 Use the normal GUI OpenCV package in requirements.txt for camera windows.
+`detect_live.py --debug` prints one line per blob (votes, dominance, margin) for
+color tuning; it is off by default because printing slows every frame.
+
+**Speed.** Detection reads the camera in a background thread and always processes
+the newest frame, so a slow frame never builds a backlog. The display shows fps
+and processing time. Processing cost grows with the rectified image size: a
+640 x 480 camera covers a 2.1 m field at about 3.3 mm per pixel, so
+`arena.mm_per_px: 3` loses no detail and is roughly three times faster than 2.
+Changing `mm_per_px` requires rerunning `calibrate_arena.py` and `find_zones.py`.
 The workspace `.runtime` directory is an ignored, headless test dependency only.
 Press `q` to quit detection, `m` to display foreground segmentation.
 
@@ -39,6 +48,8 @@ Press `q` to quit detection, `m` to display foreground segmentation.
 | --- | --- |
 | `sample_hsv.py` | Sample color ranges per class |
 | `calibrate_arena.py` | Floor corners, empty-field reference, exclusion zones |
+| `camera_probe.py` | Reports an unknown camera's settings, tests which ones it accepts, measures real fps |
+| `find_zones.py` | Finds the six color zones in `background.png`, writes circular exclusions with margin and zone centers |
 | `detect_live.py` | Live/replayed detection, UDP v2 targets to port 4210 |
 | `fake_esp32.py` | Prints v2 target packets received on localhost:4210 |
 | `robot_pose.py` | Robot x, y, heading from the roof AprilTag; detection rate |
@@ -65,10 +76,14 @@ Press `q` to quit detection, `m` to display foreground segmentation.
    press Enter. The long dimension must run horizontally; otherwise rotate the
    camera view or update dimensions. The receiver in `esp_link.ino` also has
    fixed 2100 x 1200 limits; change them if the measured field differs.
-5. On the rectified view, outline each of the six colored scoring zones and
-   any fixed fixtures, pressing Enter per polygon. Press `s` to save. These are
-   perception exclusions: anything inside them is invisible to detection.
-   The reference must include the permanent markings but no stones or robot.
+5. Exclude the six scoring zones. Either run `find_zones.py` after the reference
+   is saved (automatic circles: zone + white ring + `--margin-mm`, default 20; it
+   also stores each zone's color and center in mm under `zones`; in
+   `calibrate_arena.py` press `s` without drawing any zone to skip this step), or outline each
+   zone by hand on the rectified view, clicking outside the white ring, pressing
+   Enter per polygon and `s` to save. Anything inside an exclusion is invisible to
+   detection. The reference must include the permanent markings but no stones,
+   robots, cables or people.
 6. Place stones, inspect the foreground with `m`, and verify coordinates against
    ruler measurements. Rectified coordinates start at the top-left floor corner:
    x right, y down, in millimeters. Recalibrate after any camera move/settings change.
@@ -195,6 +210,9 @@ check, unless a different known color appears at its position.
 | `max_gem_extent_mm` | 70 | Longest side of one-stone regions |
 | `max_approach_turn_deg` | 67.5 | Allowed deviation from straight out of the pile |
 | `sticky_frames` | 0 | Frames to hold a target after it drops out |
+| `min_obstacle_mm2` | off | Ignore foreground blobs smaller than this (background speckles); e.g. 150 |
+| `edge_margin_mm` | 0 | Ignore a strip this wide along the arena border (walls, fence, mat edge) |
+| `debug_blobs` | false | One printed line per blob; set by `detect_live.py --debug` |
 
 The gripper-related values are placeholders until the arm exists.
 
@@ -208,8 +226,8 @@ The working copy of `vision.py` contains two test-time edits:
 - The size/extent check is replaced by `plausible = True`: touching same-color
   stones can be sent as one target.
 
-A per-blob `print` also slows each frame noticeably. Restore both checks after
-all six classes are sampled in the arena; the two related tests then pass again.
+Restore both checks after all six classes are sampled in the arena; the two
+related tests then pass again.
 
 ## Protocols and firmware
 
@@ -266,6 +284,7 @@ Replay requires the same camera geometry/reference and never sends UDP.
 | `test_pile.py` (7) | edge picking, buried/surrounded stones, same-color pairs, walls, packet field, off by default |
 | `test_target_lock.py` (8) | lock through flicker, timeout, occlusion, color change, sticky vision targets |
 | `test_robot_pose.py` (6) | position, heading, parallax, size check, wrong id, grip offset |
+| `test_find_zones.py` (3) | six zones and colors found among stones, missing zone reported, grown exclusion circles |
 
 With the local deviations above, two `test_vision.py` cases fail
 (`incomplete_setup_does_not_transmit_targets`, `long_thin_cluster_rejected`).

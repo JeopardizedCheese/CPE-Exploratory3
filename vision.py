@@ -86,6 +86,14 @@ class Detector:
         valid = np.full((h, w), 255, np.uint8)
         for polygon in self.cfg.get('exclude_polygons', []):
             cv2.fillPoly(valid, [np.array(polygon, np.int32)], 0)
+        edge_mm = self.options.get('edge_margin_mm', 0)
+        if edge_mm and self.cfg.get('arena', {}).get('corners_px'):
+            e = int(round(edge_mm / float(self.cfg['arena'].get('mm_per_px', 2))))
+            if e > 0:   # ignore a strip along the arena border (walls, fence, mat edge)
+                valid[:e, :] = 0
+                valid[-e:, :] = 0
+                valid[:, :e] = 0
+                valid[:, -e:] = 0
         hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
         color_masks = {int(k.split('_')[0]): mask_for(hsv, v)
                        for k, v in self.cfg['hsv'].items() if v}
@@ -138,9 +146,13 @@ class Detector:
         width_px = self.options.get('gripper_width_mm', 60) / scale
         length_px = self.options.get('approach_length_mm', 80) / scale
         start_px = self.options.get('approach_start_mm', 6) / scale
+        min_obstacle_px = self.options.get('min_obstacle_px', 12)
+        if metric and self.options.get('min_obstacle_mm2'):
+            min_obstacle_px = max(min_obstacle_px, self.options['min_obstacle_mm2'] / (scale * scale))
+        region_min_px = self.options.get('region_min_mm2', 150) / (scale * scale)
         for label in range(1, count):
             area = int(stats[label, cv2.CC_STAT_AREA])
-            if area < self.options.get('min_obstacle_px', 12):
+            if area < min_obstacle_px:
                 continue
             bx, by, bw, bh = (int(v) for v in stats[label, :4])
             x, y = centroids[label]
@@ -206,7 +218,7 @@ class Detector:
                     if approach is not None:
                         observations[-1].isolated = True
                         observations[-1].approach_deg = approach
-                else:
+                elif max(votes.values(), default=0) >= region_min_px:
                     for rx, ry, rc, conf, rarea, approach in directional_candidates(
                             labels, label, (bx, by, bw, bh), color_masks, votable, blocked,
                             scale, self.options):

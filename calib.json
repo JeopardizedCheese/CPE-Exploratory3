@@ -936,7 +936,9 @@
     "pile_mode": true,
     "sticky_frames": 5,
     "gripper_width_mm": 60,
-    "approach_length_mm": 80
+    "approach_length_mm": 80,
+    "min_obstacle_mm2": 150,
+    "edge_margin_mm": 20
   },
   "robot_tag": {
     "id": 0,
