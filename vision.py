@@ -97,8 +97,8 @@ class Detector:
         hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
         color_masks = {int(k.split('_')[0]): mask_for(hsv, v)
                        for k, v in self.cfg['hsv'].items() if v}
-        #calibrated = set(color_masks) == set(NAMES) // we will use this when we have all the colors available
-        calibrated = any(color_masks)
+        calibrated = set(color_masks) == set(NAMES) #we will use this when we have all the colors available
+        # calibrated = any(color_masks)
         ready = self.background is not None and bool(self.cfg.get('arena', {}).get('corners_px')) and calibrated
         status = 'ok' if ready else 'setup_required'
         if self.background is not None:
