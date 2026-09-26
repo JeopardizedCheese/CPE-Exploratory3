@@ -80,12 +80,19 @@ class Detector:
         self.previous_targets = [o for o in observations if o.stable and o.isolated]
 
 
-    def process(self, raw):
+    def process(self, raw, mask_polygons_mm=()):
+        """mask_polygons_mm: extra areas to ignore this frame, in arena mm (e.g. the
+        robot's footprint from robot_pose). Like exclude_polygons they are invisible
+        and block pickup clearance."""
         frame = warp(raw, self.cfg)
         h, w = frame.shape[:2]
         valid = np.full((h, w), 255, np.uint8)
         for polygon in self.cfg.get('exclude_polygons', []):
             cv2.fillPoly(valid, [np.array(polygon, np.int32)], 0)
+        if mask_polygons_mm and self.cfg.get('arena', {}).get('corners_px'):
+            per_px = float(self.cfg['arena'].get('mm_per_px', 2))
+            for polygon in mask_polygons_mm:
+                cv2.fillPoly(valid, [np.round(np.asarray(polygon, np.float64) / per_px).astype(np.int32)], 0)
         edge_mm = self.options.get('edge_margin_mm', 0)
         if edge_mm and self.cfg.get('arena', {}).get('corners_px'):
             e = int(round(edge_mm / float(self.cfg['arena'].get('mm_per_px', 2))))

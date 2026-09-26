@@ -8,7 +8,8 @@ import time
 import uuid
 import cv2
 import numpy as np
-from vision import Detector, make_packet
+from vision import make_packet
+from perception import Perception, draw_robot
 
 
 class LatestFrame:
@@ -51,20 +52,21 @@ def main():
     parser.add_argument('--video', help='Recorded video; UDP disabled for replay')
     parser.add_argument('--headless', action='store_true')
     parser.add_argument('--debug', action='store_true', help='Print one line per blob (slow)')
+    parser.add_argument('--no-robot-mask', action='store_true', help='Do not hide the robot (tag) from detection')
     args = parser.parse_args()
     cfg = json.loads(args.config.read_text())
     if args.debug:
         cfg.setdefault('vision', {})['debug_blobs'] = True
     background_path = args.config.parent / cfg.get('background_path', 'background.png')
     background = cv2.imread(str(background_path)) if background_path.exists() else None
-    detector = Detector(cfg, background)
+    perception = Perception(cfg, background, mask_robot=not args.no_robot_mask)
+    per_px = float(cfg.get('arena', {}).get('mm_per_px', 2))
     source = args.video or (args.camera_index if args.camera_index is not None else cfg.get('camera_index', 0))
     cap = cv2.VideoCapture(source)
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     session = uuid.uuid4().hex[:12]
     seq = 0
     last_send = 0
-    show_mask = False
     def send(observations, status):
         nonlocal seq
         seq += 1
@@ -88,7 +90,8 @@ def main():
             if not ok:
                 break
             started = time.perf_counter()
-            frame, observations, mask, status = detector.process(raw)
+            snap = perception.step(raw, time.monotonic())
+            frame, observations, status = snap.frame, snap.raw_observations, snap.status
             process_ms = (time.perf_counter() - started) * 1000
             t = time.monotonic()
             fps = .9 * fps + .1 / max(1e-3, t - last_frame_t)
@@ -114,16 +117,11 @@ def main():
                 cv2.putText(frame, status, (10, 25), cv2.FONT_HERSHEY_SIMPLEX, .7, (0, 0, 255), 2)
                 cv2.putText(frame, f'{fps:4.1f} fps  {process_ms:4.0f} ms', (10, 50),
                             cv2.FONT_HERSHEY_SIMPLEX, .55, (0, 0, 255), 2)
+                draw_robot(frame, snap, per_px)
                 cv2.imshow('detect', frame)
-                if show_mask:
-                    cv2.imshow('foreground', mask)
                 key = cv2.waitKey(1) & 255
                 if key == ord('q'):
                     break
-                if key == ord('m'):
-                    show_mask = not show_mask
-                    if not show_mask:
-                        cv2.destroyWindow('foreground')
     finally:
         try:
             send([], 'stopped')

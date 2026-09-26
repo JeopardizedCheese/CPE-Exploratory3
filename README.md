@@ -293,3 +293,32 @@ reliability.
 
 See [REVIEW_AND_PLAN.md](REVIEW_AND_PLAN.md) for PDF rules, design decisions,
 physical-lighting improvements, remaining robot work, and field acceptance tests.
+## Autonomy (autonomy.py)
+
+```bash
+python autonomy.py --sim --show                   # simulated robot + field, watch it (q quits)
+python autonomy.py --sim --noise --scenario pile  # with pose noise, latency, dropped tags, failed grabs
+python autonomy.py <ESP_IP> --camera 1            # real run: sends start, 5 minutes, q/x/ESC stops
+python -m unittest discover -s tests              # includes simulated runs and safety tests
+```
+
+| File | Role |
+| --- | --- |
+| `autonomy.py` | Planner state machine (SEARCH → GOTO_STAGE → ALIGN → APPROACH → GRIP → LIFT → CARRY → LOWER → RELEASE → BACKOFF) and the sim/real runners |
+| `perception.py` | Camera frame → robot pose + stones in mm; masks the robot's footprint out of detection |
+| `sim.py` | Simulated robot/field (firmware behaviour, wheels, gripper, zones, simple camera) |
+| `fake_robot.py` | Firmware stand-in on UDP 4211 for `teleop.py` tests without hardware |
+| `calibrate_grip.py` | Measures `robot_tag.grip_offset_mm` (stone in closed jaws) and `axle_offset_mm` (spin on the spot) |
+
+Safety rules in the planner: the gripper only opens over the stone's own zone; a missed
+grab (stone still visible at its old spot) is dropped outside every zone; no fresh pose
+means the wheels stop; failed approaches retry once, then the stone is skipped for 25 s.
+Tuning values go in `calib.json` → `"autonomy"` (defaults at the top of autonomy.py).
+The servo angles there must equal `firmware/robot_ctrl/config.h`.
+
+### Before the first real autonomous run (autonomy.py warns until 1 and 2 are done)
+
+1. `python calibrate_grip.py <camera> --write`: jaws closed on a stone, arm down. Run twice at different spots; results should agree within ~5 mm.
+2. `python calibrate_grip.py <camera> --axle --write`: start it, then spin the robot slowly on the spot with teleop for one full turn. In simulation, a 40 mm axle offset the planner didn't know about cut pile runs from 19 stones to 4.
+3. Measure the real drive speed (teleop at a fixed speed for a few seconds) and adjust `autonomy.cruise`/`creep` if the robot is much faster or slower than the ~300 mm/s the defaults assume.
+4. Check `robot_tag.footprint_mm` covers the robot in `detect_live.py` (the magenta outline): no blobs on the robot body.
