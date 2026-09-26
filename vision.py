@@ -168,11 +168,11 @@ class Detector:
             second = ranking[1][1] if len(ranking) > 1 else 0
             evidence = top / area
             dominance = top / max(1, sum(votes.values()))
-            # plausible = area_limits['min'] <= area * scale * scale <= area_limits['max']
-            # extent = max(bw, bh) * scale
-            # if metric and extent > self.options.get('max_gem_extent_mm', 70):
-            #     plausible = False
-            plausible = True
+            plausible = area_limits['min'] <= area * scale * scale <= area_limits['max']
+            extent = max(bw, bh) * scale
+            if metric and extent > self.options.get('max_gem_extent_mm', 70):
+                plausible = False
+            # plausible = True
 
             if debug:
                 print(
