@@ -1,15 +1,17 @@
 // Robot controller: wheels + gripper servo + all safety logic, driven by UDP protocol v3.
-// Requires ESP32 Arduino core 3.x and ArduinoJson 7.
+// Board: course IN-ENG ESP32 board. Requires ESP32 Arduino core 3.x, ArduinoJson 7
+// and the course InEngMotor library (https://github.com/zerotwobook/Embedded_System_Expo_2026).
 //
 // States:  IDLE --start--> RUNNING --5 min--> DONE
 //            ^                 | stop / button      |
 //            +------reset------ ESTOP <-------------+ (reset only if button released)
 // Wheels move only in RUNNING and only while drive packets keep arriving.
-// Servos may move in IDLE (for calibration) and RUNNING; they freeze in DONE/ESTOP
+// The gripper may move in IDLE (for calibration) and RUNNING; it freezes in DONE/ESTOP
 // (holding the stone instead of dropping it).
 #include <WiFi.h>
 #include <WiFiUdp.h>
 #include <ArduinoJson.h>
+#include <InEngMotor.h>
 #include <math.h>
 #include "secrets.h"   // copy secrets.example.h -> secrets.h
 #include "config.h"
@@ -30,36 +32,22 @@ unsigned long lastRx = 0, lastDrive = 0, runStart = 0, lastStatus = 0, lastLoop 
 IPAddress peerIp;
 uint16_t peerPort = 0;
 
-float cmdL = 0, cmdR = 0, outL = 0, outR = 0;
+float cmdL = 0, cmdR = 0, outL = 0, outR = 0;   // -1..1: commanded and ramped wheel speeds
+float servoPos = SERVO_START_DEG, servoTarget = SERVO_START_DEG;
 
-const uint8_t servoPin[SERVO_COUNT] = SERVO_PINS;
-const float servoMin[SERVO_COUNT] = SERVO_MIN_DEG;
-const float servoMax[SERVO_COUNT] = SERVO_MAX_DEG;
-const float servoStart[SERVO_COUNT] = SERVO_START_DEG;
-float servoPos[SERVO_COUNT], servoTarget[SERVO_COUNT];
-
-const uint32_t MOTOR_FULL = (1u << MOTOR_PWM_BITS) - 1;
-
-// ---------------------------------------------------------------- motors
-void writeMotor(int in1, int in2, int pwm, float v, bool invert) {
-  if (invert) v = -v;
+// ---------------------------------------------------------------- wheels
+// -1..1 -> signed speed for InEngMotor::drive. Any non-zero command gets at least
+// MIN_DUTY so the motors never sit stalled; 0 means coast.
+int toSpeed(float v) {
   v = constrain(v, -1.0f, 1.0f);
   float mag = fabsf(v);
-  uint32_t duty = mag < 0.01f ? 0 : (uint32_t)((MIN_DUTY + mag * (MAX_DUTY - MIN_DUTY)) * MOTOR_FULL);
-#if MOTOR_DRIVER == DRIVER_IN_IN_PWM
-  digitalWrite(in1, v > 0.01f);
-  digitalWrite(in2, v < -0.01f);
-  ledcWrite(pwm, duty);
-#else
-  (void)pwm;
-  ledcWrite(in1, v > 0.01f ? duty : 0);
-  ledcWrite(in2, v < -0.01f ? duty : 0);
-#endif
+  if (mag < 0.01f) return 0;
+  int s = (int)roundf((MIN_DUTY + mag * (MAX_DUTY - MIN_DUTY)) * 255.0f);
+  return v > 0 ? s : -s;
 }
 
 void applyMotors() {
-  writeMotor(L_IN1, L_IN2, L_PWM, outL, L_INVERT);
-  writeMotor(R_IN1, R_IN2, R_PWM, outR, R_INVERT);
+  inengmotor.drive(toSpeed(outL * L_GAIN), toSpeed(outR * R_GAIN));
 }
 
 void motorsOff() {
@@ -68,16 +56,8 @@ void motorsOff() {
 }
 
 void setupMotors() {
-#if MOTOR_DRIVER == DRIVER_IN_IN_PWM
-  int dirPins[] = {L_IN1, L_IN2, R_IN1, R_IN2};
-  for (int p : dirPins) { pinMode(p, OUTPUT); digitalWrite(p, LOW); }
-  ledcAttach(L_PWM, MOTOR_PWM_FREQ, MOTOR_PWM_BITS);
-  ledcAttach(R_PWM, MOTOR_PWM_FREQ, MOTOR_PWM_BITS);
-#else
-  int pwmPins[] = {L_IN1, L_IN2, R_IN1, R_IN2};
-  for (int p : pwmPins) ledcAttach(p, MOTOR_PWM_FREQ, MOTOR_PWM_BITS);
-#endif
-  if (MOTOR_STBY >= 0) { pinMode(MOTOR_STBY, OUTPUT); digitalWrite(MOTOR_STBY, HIGH); }
+  inengmotor.begin();                   // claims PWM channels 0-3: must run before setupServo()
+  inengmotor.setInvert(L_INVERT, R_INVERT);
   motorsOff();
 }
 
@@ -89,36 +69,32 @@ float ramp(float out, float cmd, float dt) {
   return fmaxf(cmd, out - step);
 }
 
-// ---------------------------------------------------------------- servos
-void servoWrite(int i, float deg) {
+// ---------------------------------------------------------------- gripper servo
+void servoWrite(float deg) {
   float us = SERVO_US_MIN + (SERVO_US_MAX - SERVO_US_MIN) * deg / 180.0f;
-  ledcWrite(servoPin[i], (uint32_t)(us * 65535.0f / 20000.0f));   // 50 Hz, 16-bit
+  ledcWrite(SERVO_PIN, (uint32_t)(us * 65535.0f / 20000.0f));   // 50 Hz, 16-bit
 }
 
-void setupServos() {
-  for (int i = 0; i < SERVO_COUNT; i++) {
-    ledcAttach(servoPin[i], 50, 16);
-    servoPos[i] = servoTarget[i] = constrain(servoStart[i], servoMin[i], servoMax[i]);
-    servoWrite(i, servoPos[i]);
-  }
+void setupServo() {
+  ledcAttach(SERVO_PIN, 50, 16);
+  servoPos = servoTarget = constrain(SERVO_START_DEG, SERVO_MIN_DEG, SERVO_MAX_DEG);
+  servoWrite(servoPos);
 }
 
-bool setServo(int i, float deg) {
-  if (i < 0 || i >= SERVO_COUNT || !isfinite(deg)) return false;
+bool setServo(float deg) {
+  if (!isfinite(deg)) return false;
   if (state != IDLE && state != RUNNING) return false;
-  servoTarget[i] = constrain(deg, servoMin[i], servoMax[i]);
+  servoTarget = constrain(deg, SERVO_MIN_DEG, SERVO_MAX_DEG);
   return true;
 }
 
-void updateServos(float dt) {
+void updateServo(float dt) {
+  if (state == DONE || state == ESTOP) servoTarget = servoPos;   // freeze
+  float d = servoTarget - servoPos;
+  if (fabsf(d) < 0.01f) return;
   float step = SERVO_DEG_PER_SEC * dt;
-  for (int i = 0; i < SERVO_COUNT; i++) {
-    if (state == DONE || state == ESTOP) servoTarget[i] = servoPos[i];   // freeze
-    float d = servoTarget[i] - servoPos[i];
-    if (fabsf(d) < 0.01f) continue;
-    servoPos[i] += constrain(d, -step, step);
-    servoWrite(i, servoPos[i]);
-  }
+  servoPos += constrain(d, -step, step);
+  servoWrite(servoPos);
 }
 
 // ---------------------------------------------------------------- state
@@ -170,12 +146,12 @@ void handlePacket(char *buf, unsigned long now) {
     enter(ESTOP, "remote stop");
   } else if (!strcmp(c, "reset")) {
     if ((state == DONE || state == ESTOP) && !buttonPressed()) enter(IDLE, "reset");
-  } else if (!strcmp(c, "servo")) {
-    setServo(doc["i"] | -1, doc["deg"] | NAN);
+  } else if (!strcmp(c, "servo")) {             // raw angle, for calibration (servo index 0 only)
+    if ((doc["i"] | 0) == 0) setServo(doc["deg"] | NAN);
   } else if (!strcmp(c, "grip")) {
     const char *p = doc["p"] | "";
-    if (!strcmp(p, "open")) setServo(GRIP_SERVO, GRIP_OPEN_DEG);
-    if (!strcmp(p, "close")) setServo(GRIP_SERVO, GRIP_CLOSE_DEG);
+    if (!strcmp(p, "open")) setServo(GRIP_OPEN_DEG);
+    if (!strcmp(p, "close")) setServo(GRIP_CLOSE_DEG);
   }
   // "ping" and unknown commands only refresh the link.
 }
@@ -205,8 +181,8 @@ void sendStatus(unsigned long now) {
   doc["rx_age_ms"] = now - lastRx;
   doc["button"] = buttonPressed();
   doc["rssi"] = WiFi.RSSI();
-  JsonArray s = doc["servo"].to<JsonArray>();
-  for (int i = 0; i < SERVO_COUNT; i++) s.add(roundf(servoPos[i]));
+  JsonArray s = doc["servo"].to<JsonArray>();   // kept as a list: the PC side reads servo[0]
+  s.add(roundf(servoPos));
   char out[256];
   size_t n = serializeJson(doc, out, sizeof(out));
   udp.beginPacket(peerIp, peerPort);
@@ -218,9 +194,9 @@ void sendStatus(unsigned long now) {
 void setup() {
   setupMotors();                       // first: make sure wheels are off
   Serial.begin(115200);
-  pinMode(STATUS_LED, OUTPUT);
+  if (STATUS_LED >= 0) pinMode(STATUS_LED, OUTPUT);
   if (ESTOP_PIN >= 0) pinMode(ESTOP_PIN, INPUT_PULLUP);
-  setupServos();
+  setupServo();                        // after setupMotors: the servo gets its own PWM channel
   WiFi.mode(WIFI_STA);
   WiFi.setSleep(false);                // lower latency
   WiFi.begin(WIFI_SSID, WIFI_PASS);
@@ -249,10 +225,10 @@ void loop() {
   outL = ramp(outL, cmdL, dt);
   outR = ramp(outR, cmdR, dt);
   applyMotors();
-  updateServos(dt);
+  updateServo(dt);
   sendStatus(now);
 
   bool blink = (now / 150) % 2;
-  digitalWrite(STATUS_LED, state == RUNNING ? HIGH : (state == IDLE ? LOW : blink));
+  if (STATUS_LED >= 0) digitalWrite(STATUS_LED, state == RUNNING ? HIGH : (state == IDLE ? LOW : blink));
   delay(2);
 }

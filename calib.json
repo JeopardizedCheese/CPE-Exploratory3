@@ -924,6 +924,10 @@
   ],
   "background_path": "background.png",
   "camera_properties": {},
+  "autonomy": {
+    "grip_open": 0,
+    "grip_close": 45
+  },
   "vision": {
     "background_delta": 30,
     "max_foreground_fraction": 0.3,

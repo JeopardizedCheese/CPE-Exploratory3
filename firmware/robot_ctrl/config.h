@@ -1,53 +1,38 @@
 #pragma once
 // ============================================================================
-//  EDIT THIS FILE to match the real wiring. Every pin below is a placeholder.
-//  ESP32 DevKit pins to AVOID: 6-11 (flash), 34-39 (input only),
-//  0/2/12/15 (boot strapping), 1/3 (USB serial).
+//  robot_ctrl settings for the course IN-ENG ESP32 board (ESP32-WROOM-32E).
+//  Wheels: onboard TB6612 driven by the InEngMotor library, fixed pins
+//          (left 26/27, right 16/17), PWM channels 0-3. Nothing to set here.
+//  Other pins used on the board: servo header 19, TFT 18/23/5/2/4,
+//  potentiometer 34, LED 23.
 // ============================================================================
 
-// ---------- Motor driver type ----------
-// DRIVER_IN_IN_PWM : TB6612FNG, L298N  (IN1, IN2 direction + PWM/EN speed)
-// DRIVER_TWO_PWM   : DRV8833, MX1508   (two PWM inputs per motor, *_PWM unused)
-#define DRIVER_IN_IN_PWM 1
-#define DRIVER_TWO_PWM   2
-#define MOTOR_DRIVER DRIVER_IN_IN_PWM
-
-#define L_IN1 26
-#define L_IN2 27
-#define L_PWM 25
-#define R_IN1 32
-#define R_IN2 33
-#define R_PWM 13
-#define MOTOR_STBY -1        // TB6612 STBY pin, or -1 if tied to 3.3V
-
-#define L_INVERT false       // flip if "forward" spins this wheel backwards
+// ---------- Wheels ----------
+#define L_INVERT true        // InEngMotor board default is (true, false); flip one if a wheel runs backwards
 #define R_INVERT false
-
-#define MOTOR_PWM_FREQ 20000
-#define MOTOR_PWM_BITS 10
-#define MAX_DUTY 0.60f       // start low; raise after first tests
-#define MIN_DUTY 0.00f       // duty where wheels just start moving (measure it)
+#define L_GAIN 1.00f         // straight-line trim: lower the stronger wheel (e.g. 0.90)
+#define R_GAIN 1.00f
+#define MAX_DUTY 1.00f       // 255 = full power
+#define MIN_DUTY 0.79f       // ~200/255: below this the motors stall (measured). Any non-zero command starts here
 #define RAMP_PER_SEC 3.0f    // speed-up limit (full scale per second); slow-down is instant
 
-// ---------- Servo (gripper only; no lift) ----------
-#define SERVO_COUNT 1
-#define SERVO_PINS      {18}
-#define SERVO_MIN_DEG   {0}          // mechanical limits: measure so the jaws never stall on their stops
-#define SERVO_MAX_DEG   {180}
-#define SERVO_START_DEG {90}         // position at boot (the servo WILL jump here at power-on)
-#define SERVO_US_MIN 500
-#define SERVO_US_MAX 2500
-#define SERVO_DEG_PER_SEC 180.0f     // slow moves reduce current spikes / brownout
-
-// Named poses (fill in after calibrating with the raw "servo" command)
-#define GRIP_SERVO 0
-#define GRIP_OPEN_DEG  60
-#define GRIP_CLOSE_DEG 120
+// ---------- Gripper servo (SG90) ----------
+#define SERVO_PIN 19             // IN-ENG board servo header
+#define SERVO_US_MIN 500         // pulse width at 0 deg   (same as course example 03)
+#define SERVO_US_MAX 2500        // pulse width at 180 deg
+#define SERVO_MIN_DEG 0          // never command outside this range
+#define SERVO_MAX_DEG 55         // a little past closed
+#define SERVO_START_DEG 0        // open at boot (the servo WILL jump here at power-on)
+#define SERVO_DEG_PER_SEC 180.0f // slow moves reduce current spikes / brownout
+#define GRIP_OPEN_DEG 0          // measured: jaws open
+#define GRIP_CLOSE_DEG 45        // measured: holds every stone size
 
 // ---------- Safety ----------
-#define ESTOP_PIN 23             // push button to GND (INPUT_PULLUP). -1 disables: NOT recommended
+#define ESTOP_PIN 0              // BOOT button (press = stop). -1 disables
 #define DRIVE_TIMEOUT_MS 300     // no drive packet for this long -> wheels stop
 #define RUN_TIME_MS 300000UL     // 5 minutes from "start"
+#define STATUS_LED 23            // board LED: off = IDLE, on = RUNNING, blinking = DONE/ESTOP. -1 = none
+
+// ---------- Network ----------
 #define UDP_PORT 4211
 #define STATUS_PERIOD_MS 200
-#define STATUS_LED 2
