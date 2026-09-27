@@ -201,8 +201,8 @@ void setup() {
   WiFi.setSleep(false);                // lower latency
 
   #if USE_STATIC_IP
-  WiFi.config(IPAddress(STATIC_IP), IPAddress(GATEWAY_IP), IPAddress(SUBNET_IP), IPAddress(GATEWAY_IP));
-#endif
+    WiFi.config(IPAddress(STATIC_IP), IPAddress(GATEWAY_IP), IPAddress(SUBNET_IP), IPAddress(GATEWAY_IP));
+  #endif
 
   WiFi.begin(WIFI_SSID, WIFI_PASS);
   unsigned long t0 = millis();
