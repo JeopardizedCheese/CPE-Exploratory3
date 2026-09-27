@@ -947,7 +947,7 @@
   "robot_tag": {
     "id": 0,
     "family": "36h11",
-    "size_mm": 100,
+    "size_mm": 112,
     "height_mm": 150,
     "camera_height_mm": 1815,
     "camera_floor_xy_mm": [

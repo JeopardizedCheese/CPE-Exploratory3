@@ -199,6 +199,11 @@ void setup() {
   setupServo();                        // after setupMotors: the servo gets its own PWM channel
   WiFi.mode(WIFI_STA);
   WiFi.setSleep(false);                // lower latency
+
+  #if USE_STATIC_IP
+  WiFi.config(IPAddress(STATIC_IP), IPAddress(GATEWAY_IP), IPAddress(SUBNET_IP), IPAddress(GATEWAY_IP));
+#endif
+
   WiFi.begin(WIFI_SSID, WIFI_PASS);
   unsigned long t0 = millis();
   while (WiFi.status() != WL_CONNECTED && millis() - t0 < 15000) delay(100);

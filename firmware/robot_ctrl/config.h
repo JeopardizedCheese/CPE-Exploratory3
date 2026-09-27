@@ -13,7 +13,7 @@
 #define L_GAIN 1.00f         // straight-line trim: lower the stronger wheel (e.g. 0.90)
 #define R_GAIN 1.00f
 #define MAX_DUTY 1.00f       // 255 = full power
-#define MIN_DUTY 0.79f       // ~200/255: below this the motors stall (measured). Any non-zero command starts here
+#define MIN_DUTY 0.71f       // ~200/255: below this the motors stall (measured). Any non-zero command starts here
 #define RAMP_PER_SEC 3.0f    // speed-up limit (full scale per second); slow-down is instant
 
 // ---------- Gripper servo (SG90) ----------
@@ -36,3 +36,7 @@
 // ---------- Network ----------
 #define UDP_PORT 4211
 #define STATUS_PERIOD_MS 200
+#define USE_STATIC_IP 1
+#define STATIC_IP  10, 178, 188, 50
+#define GATEWAY_IP 10, 178, 188, 223
+#define SUBNET_IP  255, 255, 255, 0
